@@ -1,0 +1,221 @@
+name: unity-ci
+
+inputs:
+  unity-version:
+    description: "Unity version installed on the runner (e.g. \"2021.3.0f1\")"
+    required: true
+  project-path:
+    description: "Path to Unity project (or package root)"
+    required: false
+    default: "$GITHUB_WORKSPACE"
+  skip-tests:
+    description: "Skip running unit tests"
+    required: false
+    default: "false"
+  test-platform:
+    description: "Test platform (playmode or editmode)"
+    required: false
+    default: "playmode"
+  test-log-file:
+    description: "Path to test log file"
+    required: false
+    default: "$GITHUB_WORKSPACE/unity-test.log"
+  test-results-file:
+    description: "Path to test results XML"
+    required: false
+    default: "$GITHUB_WORKSPACE/test-results.xml"
+  extra-test-args:
+    description: "Additional command-line arguments for Unity test runner"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Detect OS & Unity path
+      shell: bash
+      run: |
+        set -euo pipefail
+        
+        UNITY_VER="${{ inputs.unity-version }}"
+
+        # UNAME is derived from `uname` lowercased for OS detection
+        UNAME=$(uname | tr '[:upper:]' '[:lower:]')
+        case "$UNAME" in
+          linux*)
+            UNITY_PATH="$HOME/Unity/$UNITY_VER/Unity/Editor/Unity"
+            ;;
+          darwin*)
+            UNITY_PATH="/Applications/Unity/Hub/Editor/$UNITY_VER/Unity.app/Contents/MacOS/Unity"
+            ;;
+          mingw*|msys*|cygwin*)
+            UNITY_PATH="/c/Program Files/Unity/Hub/Editor/$UNITY_VER/Editor/Unity.exe"
+            ;;
+          *)
+            echo "❌ Unsupported OS: $UNAME" >&2
+            exit 1
+            ;;
+        esac
+        
+        if [[ ! -x "$UNITY_PATH" ]]; then
+          echo "❌ Could not find Unity version $VERSION at: $UNITY_PATH" >&2
+          exit 1
+        fi
+
+        # Export UNITY_PATH to environment for subsequent steps
+        echo "UNITY_PATH=$UNITY_PATH" >> $GITHUB_ENV
+        echo "UNAME=$UNAME" >> $GITHUB_ENV
+
+    - name: Ensure jq is available
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if command -v jq &>/dev/null; then
+          JQ_PATH=$(command -v jq)
+          echo "🔍 Found jq at $JQ_PATH"
+        else
+          echo "🔧 jq not found, installing to $RUNNER_TEMP..."
+
+          case "$UNAME" in
+            linux*)
+              JQ_URL="https://github.com/stedolan/jq/releases/latest/download/jq-linux64"
+              JQ_BIN="$RUNNER_TEMP/jq"
+              ;;
+            darwin*)
+              JQ_URL="https://github.com/stedolan/jq/releases/latest/download/jq-macos-arm64"
+              JQ_BIN="$RUNNER_TEMP/jq"
+              ;;
+            mingw*|msys*|cygwin*)
+              JQ_URL="https://github.com/jqlang/jq/releases/latest/download/jq-win64.exe"
+              JQ_BIN="$RUNNER_TEMP/jq.exe"
+              ;;
+            *)
+              echo "❌ Unsupported OS: $UNAME" >&2
+              exit 1
+              ;;
+          esac
+
+          curl -sSL -o "$JQ_BIN" "$JQ_URL"
+          chmod +x "$JQ_BIN"
+          JQ_PATH="$JQ_BIN"
+        fi
+
+        echo "JQ_PATH=$JQ_PATH" >> $GITHUB_ENV
+    
+    - name: Determine project vs. package
+      shell: bash
+      run:  |
+        set -euo pipefail
+
+        PROJECT_PATH="${{ inputs.project-path }}"
+        if [[ -f "$PROJECT_PATH/ProjectSettings/ProjectVersion.txt" ]]; then
+          echo "Detected full Unity project."
+          echo "USE_PACKAGE_MODE=false" >> $GITHUB_ENV
+        elif [[ -f "$PROJECT_PATH/package.json" ]]; then
+
+          PACKAGE_NAME=$("$JQ_PATH" -r .name "$PROJECT_PATH/package.json")
+          if [[ -z "$PACKAGE_NAME" || "$PACKAGE_NAME" == "null" ]]; then
+            echo "❌ package.json missing \"name\" field" >&2
+            exit 1
+          fi
+          echo "Detected Unity package: $PACKAGE_NAME"
+          echo "PACKAGE_NAME=$PACKAGE_NAME" >> $GITHUB_ENV
+          echo "USE_PACKAGE_MODE=true" >> $GITHUB_ENV
+        else
+          echo "❌ Invalid Unity project or package path: $PROJECT_PATH" >&2
+          exit 1
+        fi
+
+    - name: Run Unity unit tests
+      id: run-tests
+      if: inputs.skip-tests == 'false'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "Running Unity tests..."
+
+        UNAME=$(uname | tr '[:upper:]' '[:lower:]')
+
+        PROJECT_PATH="${{ inputs.project-path }}"
+        PLATFORM="${{ inputs.test-platform }}"
+        LOG_FILE="${{ inputs.test-log-file }}"
+        RESULTS_FILE="${{ inputs.test-results-file }}"
+        EXTRA_ARGS="${{ inputs.extra-test-args }}"
+
+        mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$RESULTS_FILE")"
+
+        # If package mode, create a temp project and link the package
+        if [[ "$USE_PACKAGE_MODE" == "true" ]]; then
+          TMP_DIR="$RUNNER_TEMP/temp-unity-project"
+          rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
+
+          # create a temp project
+          CLI_TMP_DIR=$TMP_DIR
+          case "$UNAME" in
+            mingw*|msys*|cygwin*)
+              CLI_TMP_DIR=$(cygpath -w "$TMP_DIR")
+            ;;
+          esac
+          "$UNITY_PATH" -batchmode -createProject "$CLI_TMP_DIR" -quit || true
+          echo "Temp project created: $TMP_DIR"
+
+          # link package via manifest.json
+          MANIFEST="$TMP_DIR/Packages/manifest.json"
+          mkdir -p "$(dirname "$MANIFEST")"
+
+          # make sure the package path is correct
+          case "$UNAME" in
+            mingw*|msys*|cygwin*)
+              CLI_PROJECT_PATH=$(cygpath -w "$PROJECT_PATH")
+              ;;
+          esac
+          
+          "$JQ_PATH" \
+            --arg name "$PACKAGE_NAME" \
+            --arg path "file:$CLI_PROJECT_PATH" \
+            '
+              .dependencies += {
+                "com.unity.testtools.codecoverage": "1.2.6",
+                ($name): $path
+              } |
+              .testables = (.testables // []) + [$name]
+            ' "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+
+          PROJECT_PATH="$TMP_DIR"
+        fi
+
+        # Prepare CLI paths: only for Unity invocation
+        CLI_PROJECT_PATH="$PROJECT_PATH"
+        CLI_LOG_FILE="$LOG_FILE"
+        CLI_RESULTS_FILE="$RESULTS_FILE"
+
+        case "$UNAME" in
+          mingw*|msys*|cygwin*)
+            CLI_PROJECT_PATH=$(cygpath -w "$PROJECT_PATH")
+            CLI_LOG_FILE=$(cygpath -w "$LOG_FILE")
+            CLI_RESULTS_FILE=$(cygpath -w "$RESULTS_FILE")
+            ;;
+        esac
+
+        # Run Unity tests
+        "$UNITY_PATH" \
+          -batchmode \
+          -projectPath "$CLI_PROJECT_PATH" \
+          -runTests \
+          -testPlatform "$PLATFORM" \
+          -logFile "$CLI_LOG_FILE" \
+          -testResults "$CLI_RESULTS_FILE" \
+          $EXTRA_ARGS
+
+        # Catch exit code
+        TEST_EXIT_CODE=$?
+
+        # Display results
+        if [ "$TEST_EXIT_CODE" -eq 0 ]; then
+          echo "✅ Unity tests completed successfully with no failures."
+        else
+          echo "❌ Unity tests failed (exit code: $TEST_EXIT_CODE)." >&2
+          exit 1
+        fi
