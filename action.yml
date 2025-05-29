@@ -166,6 +166,7 @@ runs:
           mkdir -p "$(dirname "$MANIFEST")"
 
           # make sure the package path is correct
+          CLI_PROJECT_PATH=$PROJECT_PATH
           case "$UNAME" in
             mingw*|msys*|cygwin*)
               CLI_PROJECT_PATH=$(cygpath -w "$PROJECT_PATH")
