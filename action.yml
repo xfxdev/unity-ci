@@ -58,7 +58,7 @@ runs:
         esac
         
         if [[ ! -x "$UNITY_PATH" ]]; then
-          echo "❌ Could not find Unity version $VERSION at: $UNITY_PATH" >&2
+          echo "❌ Could not find Unity version $UNITY_VER at: $UNITY_PATH" >&2
           exit 1
         fi
 
