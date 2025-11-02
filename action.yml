@@ -12,6 +12,10 @@ inputs:
     description: "Skip running unit tests"
     required: false
     default: "false"
+  batchmode:
+    description: "Run Unity in batchmode (true/false)"
+    required: false
+    default: "true"
   test-platform:
     description: "Test platform (playmode or editmode)"
     required: false
@@ -158,6 +162,7 @@ runs:
               CLI_TMP_DIR=$(cygpath -w "$TMP_DIR")
             ;;
           esac
+
           "$UNITY_PATH" -batchmode -createProject "$CLI_TMP_DIR" -quit || true
           echo "Temp project created: $TMP_DIR"
 
@@ -200,9 +205,15 @@ runs:
             ;;
         esac
 
+        if [ "${{ inputs.batchmode }}" = "true" ]; then
+            BATCH_FLAG="-batchmode"
+          else
+            BATCH_FLAG=""
+          fi
+
         # Run Unity tests
         "$UNITY_PATH" \
-          -batchmode \
+          $BATCH_FLAG \
           -projectPath "$CLI_PROJECT_PATH" \
           -runTests \
           -testPlatform "$PLATFORM" \
