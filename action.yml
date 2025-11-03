@@ -151,6 +151,13 @@ runs:
 
         mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$RESULTS_FILE")"
 
+        XVFB_RUN=""
+        case "$UNAME" in
+          linux*)
+            XVFB_RUN="xvfb-run"
+          ;;
+        esac
+
         # If package mode, create a temp project and link the package
         if [[ "$USE_PACKAGE_MODE" == "true" ]]; then
           TMP_DIR="$RUNNER_TEMP/temp-unity-project"
@@ -164,7 +171,7 @@ runs:
             ;;
           esac
 
-          "$UNITY_PATH" -batchmode -createProject "$CLI_TMP_DIR" -quit || true
+          $XVFB_RUN "$UNITY_PATH" -batchmode -createProject "$CLI_TMP_DIR" -quit || true
           echo "Temp project created: $TMP_DIR"
 
           # link package via manifest.json
@@ -206,14 +213,15 @@ runs:
             ;;
         esac
 
-        if [ "${{ inputs.batchmode }}" = "true" ]; then
-            BATCH_FLAG="-batchmode"
-          else
-            BATCH_FLAG=""
-          fi
+        BATCH_FLAG=""
+        if [ "${{ inputs.batchmode }}" == "true" ]; then
+          BATCH_FLAG="-batchmode"
+        else
+          XVFB_RUN=""
+        fi
 
         # Run Unity tests
-        "$UNITY_PATH" \
+        $XVFB_RUN "$UNITY_PATH" \
           $BATCH_FLAG \
           -projectPath "$CLI_PROJECT_PATH" \
           -runTests \
