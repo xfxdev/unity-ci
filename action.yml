@@ -47,7 +47,8 @@ runs:
         UNAME=$(uname | tr '[:upper:]' '[:lower:]')
         case "$UNAME" in
           linux*)
-            UNITY_PATH="$HOME/Unity/$UNITY_VER/Unity/Editor/Unity"
+            # UNITY_PATH="$HOME/Unity/$UNITY_VER/Unity/Editor/Unity"
+            UNITY_PATH="$HOME/Unity/Hub/Editor/$UNITY_VER/Editor/Unity"
             ;;
           darwin*)
             UNITY_PATH="/Applications/Unity/Hub/Editor/$UNITY_VER/Unity.app/Contents/MacOS/Unity"
