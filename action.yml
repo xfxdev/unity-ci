@@ -27,11 +27,15 @@ inputs:
   test-log-file:
     description: "Path to test log file"
     required: false
-    default: "$GITHUB_WORKSPACE/unity-test.log"
+    # Default outside $GITHUB_WORKSPACE: in package mode the package is linked
+    # via file:$GITHUB_WORKSPACE and Unity's Asset Pipeline watches every file
+    # in that tree. Writing the log inside it triggers a reimport on every
+    # write, causing an infinite import loop that starves test execution.
+    default: "$RUNNER_TEMP/unity-test.log"
   test-results-file:
     description: "Path to test results XML"
     required: false
-    default: "$GITHUB_WORKSPACE/test-results.xml"
+    default: "$RUNNER_TEMP/test-results.xml"
   extra-test-args:
     description: "Additional command-line arguments for Unity test runner"
     required: false
