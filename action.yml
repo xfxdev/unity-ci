@@ -45,7 +45,7 @@ inputs:
     required: false
     default: ""
   build-target:
-    description: "Target for -buildTarget (e.g. StandaloneOSX). Use this OR build-profile, not both."
+    description: "Value for Unity's -buildTarget: a CLI token (win64, osxuniversal, linux64, ios, android, webgl, ...), NOT a BuildTarget enum name like StandaloneOSX. Use this OR build-profile, not both."
     required: false
     default: ""
   build-profile:
