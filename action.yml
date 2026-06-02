@@ -40,6 +40,22 @@ inputs:
     description: "Additional command-line arguments for Unity test runner"
     required: false
     default: ""
+  build-path:
+    description: "Output path passed to Unity's -build. Caller supplies the full path including any platform-specific extension (e.g. .exe / .app); see Unity's Platform build path reference."
+    required: false
+    default: ""
+  build-target:
+    description: "Target for -buildTarget (e.g. StandaloneOSX). Use this OR build-profile, not both."
+    required: false
+    default: ""
+  build-profile:
+    description: "Path to a Build Profile asset for -activeBuildProfile. Use this OR build-target, not both."
+    required: false
+    default: ""
+  build-log-file:
+    description: "Path to write the Unity build log to. Dumped to the console only if the build fails."
+    required: false
+    default: "$RUNNER_TEMP/unity-build.log"
 
 runs:
   using: "composite"
@@ -248,3 +264,55 @@ runs:
           echo "❌ Unity tests failed (exit code: $TEST_EXIT_CODE)." >&2
           exit 1
         fi
+
+    - name: Build player
+      if: inputs.build-target != '' || inputs.build-profile != ''
+      shell: bash
+      env:
+        TARGET: ${{ inputs.build-target }}
+        PROFILE: ${{ inputs.build-profile }}
+        OUT: ${{ inputs.build-path }}
+      run: |
+        set -euo pipefail
+
+        # A package has no player to build — skip regardless of build inputs.
+        if [ "${USE_PACKAGE_MODE:-false}" = "true" ]; then
+          echo "ℹ️ package mode — nothing to build, skipping"
+          exit 0
+        fi
+
+        [ -n "$OUT" ] || { echo "❌ build-path is required to build" >&2; exit 1; }
+        if [ -n "$TARGET" ] && [ -n "$PROFILE" ]; then
+          echo "❌ set build-target OR build-profile, not both" >&2; exit 1
+        fi
+
+        LOG="${{ inputs.build-log-file }}"
+        mkdir -p "$(dirname "$OUT")" "$(dirname "$LOG")"
+
+        PROJ="${{ inputs.project-path }}"
+        UNAME=$(uname | tr '[:upper:]' '[:lower:]')
+        CLI_PROJ="$PROJ"; CLI_OUT="$OUT"; CLI_LOG="$LOG"; CAT_LOG="$LOG"
+        case "$UNAME" in
+          mingw*|msys*|cygwin*)
+            CLI_PROJ=$(cygpath -w "$PROJ"); CLI_OUT=$(cygpath -w "$OUT"); CLI_LOG=$(cygpath -w "$LOG")
+            CAT_LOG=$(cygpath -u "$LOG") ;;
+        esac
+
+        SELECTOR=()
+        if [ -n "$TARGET" ]; then
+          SELECTOR=(-buildTarget "$TARGET")
+        else
+          SELECTOR=(-activeBuildProfile "$PROFILE")
+        fi
+
+        echo "🏗 Building -> $OUT (log: $LOG)"
+        if ! "$UNITY_PATH" -batchmode -nographics -quit \
+          -projectPath "$CLI_PROJ" \
+          "${SELECTOR[@]}" \
+          -build "$CLI_OUT" \
+          -logFile "$CLI_LOG"; then
+          echo "::error::Unity build failed — log follows" >&2
+          cat "$CAT_LOG" >&2 || true
+          exit 1
+        fi
+        echo "✅ Build complete -> $OUT"
