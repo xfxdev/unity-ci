@@ -45,7 +45,7 @@ inputs:
     required: false
     default: ""
   build-target:
-    description: "Value for Unity's -buildTarget: a CLI token (win64, osxuniversal, linux64, ios, android, webgl, ...), NOT a BuildTarget enum name like StandaloneOSX. Use this OR build-profile, not both."
+    description: "Standalone target, enum name or token: StandaloneWindows64|win64, StandaloneOSX|osxuniversal, StandaloneLinux64|linux64. For other platforms use build-profile. Use this OR build-profile."
     required: false
     default: ""
   build-profile:
@@ -298,18 +298,23 @@ runs:
             CAT_LOG=$(cygpath -u "$LOG") ;;
         esac
 
-        SELECTOR=()
-        if [ -n "$TARGET" ]; then
-          SELECTOR=(-buildTarget "$TARGET")
+        # -build needs a profile on Unity 6; a standalone target uses the legacy player flag.
+        BUILD_ARGS=()
+        if [ -n "$PROFILE" ]; then
+          BUILD_ARGS=(-activeBuildProfile "$PROFILE" -build "$CLI_OUT")
         else
-          SELECTOR=(-activeBuildProfile "$PROFILE")
+          case "$TARGET" in
+            StandaloneWindows64|win64)  BUILD_ARGS=(-buildWindows64Player "$CLI_OUT") ;;
+            StandaloneOSX|osxuniversal) BUILD_ARGS=(-buildOSXUniversalPlayer "$CLI_OUT") ;;
+            StandaloneLinux64|linux64)  BUILD_ARGS=(-buildLinux64Player "$CLI_OUT") ;;
+            *) echo "::error::unsupported build-target '$TARGET' — use build-profile" >&2; exit 1 ;;
+          esac
         fi
 
         echo "🏗 Building -> $OUT (log: $LOG)"
         if ! "$UNITY_PATH" -batchmode -nographics -quit \
           -projectPath "$CLI_PROJ" \
-          "${SELECTOR[@]}" \
-          -build "$CLI_OUT" \
+          "${BUILD_ARGS[@]}" \
           -logFile "$CLI_LOG"; then
           echo "::error::Unity build failed — log follows" >&2
           cat "$CAT_LOG" >&2 || true
