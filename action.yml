@@ -186,8 +186,9 @@ runs:
 
         # If package mode, create a temp project and link the package
         if [[ "$USE_PACKAGE_MODE" == "true" ]]; then
-          TMP_DIR="$RUNNER_TEMP/temp-unity-project"
-          rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
+          # Unique per call: a previous call's Unity helpers can still hold its folder open on Windows.
+          # The runner empties $RUNNER_TEMP at job end.
+          TMP_DIR="$(mktemp -d "$RUNNER_TEMP/temp-unity-project.XXXXXX")"
 
           # create a temp project
           CLI_TMP_DIR=$TMP_DIR
