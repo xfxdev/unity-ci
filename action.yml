@@ -245,6 +245,10 @@ runs:
           BATCH_FLAG="-batchmode"
         fi
 
+        $XVFB_RUN "$UNITY_PATH" -batchmode -quit \
+          -projectPath "$CLI_PROJECT_PATH" \
+          -logFile "$CLI_LOG_FILE"
+
         # Run Unity tests
         $XVFB_RUN "$UNITY_PATH" \
           $BATCH_FLAG \
